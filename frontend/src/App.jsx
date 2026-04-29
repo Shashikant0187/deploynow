@@ -1,12 +1,19 @@
-import { useState, useEffect } from "react";
+import "./App.css";
+import { useState, useEffect, useRef } from "react";
 
 function App() {
   const [repoUrl, setRepoUrl] = useState("");
   const [deployments, setDeployments] = useState([]);
   const [loading, setLoading] = useState(false);
+
   const [logs, setLogs] = useState("");
   const [showLogs, setShowLogs] = useState(false);
+  const [logsLoading, setLogsLoading] = useState(false);
+  const [activeLogId, setActiveLogId] = useState(null);
 
+  const logRef = useRef(null);
+
+  // 🚀 Deploy
   const handleDeploy = async () => {
     if (!repoUrl) return alert("Enter repo URL");
 
@@ -14,9 +21,7 @@ function App() {
 
     await fetch("http://localhost:5000/deploy", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ repoUrl }),
     });
 
@@ -25,19 +30,59 @@ function App() {
     fetchDeployments();
   };
 
+  // 📦 Fetch deployments
   const fetchDeployments = async () => {
     const res = await fetch("http://localhost:5000/deployments");
     const data = await res.json();
     setDeployments(data.reverse());
   };
 
-  const handleLogs = async (id) => {
-    const res = await fetch(`http://localhost:5000/logs/${id}`);
-    const data = await res.json();
-    setLogs(data.logs);
-    setShowLogs(true);
-  };
+  // 📜 Open logs
+const handleLogs = (id) => {
+  console.log("CLICKED LOGS:", id);  // 👈 add this
+  setShowLogs(true);
+  setLogs("");
+  setLogsLoading(true);
+  setActiveLogId(id);
+};
+  // 🔁 Poll logs (auto refresh)
+  useEffect(() => {
+    if (!showLogs || !activeLogId) return;
 
+    const fetchLogs = async () => {
+      try {
+        const res = await fetch(`http://localhost:5000/logs/${activeLogId}`);
+        const data = await res.json();
+
+        const logText =
+          !data.logs || data.logs === "No logs found"
+            ? ""
+            : Array.isArray(data.logs)
+            ? data.logs.join("\n")
+            : data.logs;
+
+        setLogs(logText);
+        setLogsLoading(false);
+      } catch {
+        setLogs("Error fetching logs...");
+        setLogsLoading(false);
+      }
+    };
+
+    fetchLogs(); // initial
+    const interval = setInterval(fetchLogs, 2000);
+
+    return () => clearInterval(interval);
+  }, [showLogs, activeLogId]);
+
+  // ⏬ Auto scroll logs
+  useEffect(() => {
+    if (logRef.current) {
+      logRef.current.scrollTop = logRef.current.scrollHeight;
+    }
+  }, [logs]);
+
+  // ⛔ Stop
   const handleStop = async (id) => {
     await fetch(`http://localhost:5000/deploy/${id}/stop`, {
       method: "POST",
@@ -45,6 +90,7 @@ function App() {
     fetchDeployments();
   };
 
+  // 🗑 Delete
   const handleDelete = async (id) => {
     await fetch(`http://localhost:5000/deploy/${id}`, {
       method: "DELETE",
@@ -52,141 +98,106 @@ function App() {
     fetchDeployments();
   };
 
+  // 🔄 Initial load
   useEffect(() => {
     fetchDeployments();
     const interval = setInterval(fetchDeployments, 3000);
     return () => clearInterval(interval);
   }, []);
 
-  const getStatusColor = (status) => {
-    switch (status) {
-      case "success":
-        return "green";
-      case "failed":
-        return "red";
-      case "running":
-        return "blue";
-      case "installing":
-        return "orange";
-      default:
-        return "gray";
-    }
+  // 📊 Stats
+  const stats = {
+    total: deployments.length,
+    running: deployments.filter(d => d.status === "running").length,
+    success: deployments.filter(d => d.status === "success").length,
+    failed: deployments.filter(d => d.status === "failed").length,
   };
 
   return (
-    <div style={{ fontFamily: "Arial", padding: "30px", background: "#f5f7fa", minHeight: "100vh" }}>
-      <h1>🚀 DeployNow</h1>
-      <p>Deploy your GitHub projects instantly</p>
+    <div className="container">
 
-      {/* INPUT */}
-      <div style={{ marginBottom: "20px" }}>
-        <input
-          type="text"
-          placeholder="https://github.com/user/project"
-          value={repoUrl}
-          onChange={(e) => setRepoUrl(e.target.value)}
-          style={{
-            width: "400px",
-            padding: "10px",
-            borderRadius: "6px",
-            border: "1px solid #ccc",
-            marginRight: "10px"
-          }}
-        />
-
-        <button
-          onClick={handleDeploy}
-          disabled={loading}
-          style={{
-            padding: "10px 20px",
-            background: loading ? "#999" : "#4CAF50",
-            color: "white",
-            border: "none",
-            borderRadius: "6px",
-            cursor: "pointer"
-          }}
-        >
-          {loading ? "Deploying..." : "Deploy"}
-        </button>
+      {/* Sidebar */}
+      <div className="sidebar">
+        <h2>🚀 DeployNow</h2>
+        <p>Dashboard</p>
       </div>
 
-      <h2>Your Deployments</h2>
+      {/* Main */}
+      <div className="main">
 
-      {/* DEPLOYMENTS */}
-      {deployments.map((d) => (
-        <div
-          key={d.id}
-          style={{
-            background: "white",
-            padding: "15px",
-            marginBottom: "10px",
-            borderRadius: "8px",
-            boxShadow: "0 2px 8px rgba(0,0,0,0.1)"
-          }}
-        >
-          <p><strong>Repo:</strong> {d.repoUrl}</p>
-
-          <p>
-            <strong>Status:</strong>{" "}
-            <span style={{ color: getStatusColor(d.status), fontWeight: "bold" }}>
-              {d.status}
-            </span>
-          </p>
-
-          {d.url && (
-            <a href={d.url} target="_blank">
-              🌐 Visit Deployment
-            </a>
-          )}
-
-          {/* ACTION BUTTONS */}
-          <div style={{ marginTop: "10px" }}>
-            <button onClick={() => handleLogs(d.id)}>Logs</button>
-
-            <button
-              onClick={() => handleStop(d.id)}
-              style={{ marginLeft: "10px" }}
-            >
-              Stop
-            </button>
-
-            <button
-              onClick={() => handleDelete(d.id)}
-              style={{ marginLeft: "10px", color: "red" }}
-            >
-              Delete
-            </button>
-          </div>
+        <div className="header">
+          <h1>Deploy Dashboard</h1>
+          <p>Deploy and manage your applications</p>
         </div>
-      ))}
 
-      {/* LOG MODAL */}
+        {/* Input */}
+        <div className="deploy-box">
+          <input
+            type="text"
+            placeholder="https://github.com/user/project"
+            value={repoUrl}
+            onChange={(e) => setRepoUrl(e.target.value)}
+          />
+          <button onClick={handleDeploy} disabled={loading}>
+            {loading ? "Deploying..." : "Deploy"}
+          </button>
+        </div>
+
+        {/* Stats */}
+        <div className="stats">
+          <div className="card"><h3>Total</h3><h2>{stats.total}</h2></div>
+          <div className="card"><h3>Running</h3><h2>{stats.running}</h2></div>
+          <div className="card"><h3>Success</h3><h2>{stats.success}</h2></div>
+          <div className="card"><h3>Failed</h3><h2>{stats.failed}</h2></div>
+        </div>
+
+        {/* Deployments */}
+        <div className="deployments">
+          <h2>Recent Deployments</h2>
+
+          {deployments.slice(0, 10).map((d) => (
+            <div key={d.id} className="deploy-card">
+
+              <div>
+                <p className="repo">{d.repoUrl}</p>
+                <p className={`status status-${d.status}`}>{d.status}</p>
+
+                {d.url && (
+                  <a href={d.url} target="_blank" rel="noreferrer">
+                    🌐 Visit
+                  </a>
+                )}
+              </div>
+
+              <div className="actions">
+                <button onClick={() => handleLogs(d.id)}>Logs</button>
+                <button className="btn-stop" onClick={() => handleStop(d.id)}>Stop</button>
+                <button className="btn-delete" onClick={() => handleDelete(d.id)}>Delete</button>
+              </div>
+
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Logs Modal */}
       {showLogs && (
-        <div style={{
-          position: "fixed",
-          top: 0,
-          left: 0,
-          width: "100%",
-          height: "100%",
-          background: "rgba(0,0,0,0.6)",
-          display: "flex",
-          justifyContent: "center",
-          alignItems: "center"
-        }}>
-          <div style={{
-            background: "white",
-            padding: "20px",
-            width: "70%",
-            maxHeight: "80%",
-            overflow: "auto",
-            borderRadius: "8px"
-          }}>
-            <h3>Logs</h3>
-            <pre style={{ fontSize: "12px" }}>{logs}</pre>
+        <div className="modal">
+          <div className="modal-box">
 
-            <button onClick={() => setShowLogs(false)}>
-              Close
-            </button>
+            <div className="modal-header">
+              <h3>Logs</h3>
+              <button onClick={() => setShowLogs(false)}>✖</button>
+            </div>
+
+            <div className="log-content" ref={logRef}>
+              {logsLoading ? (
+                <p className="no-logs">⏳ Fetching logs...</p>
+              ) : (
+                <pre>{logs || "No logs yet..."}</pre>
+              )}
+            </div>
+
           </div>
         </div>
       )}
